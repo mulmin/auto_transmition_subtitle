@@ -1,106 +1,76 @@
 import os
-import whisper
-import srt
 import sys
-from moviepy.editor import VideoFileClip 
-from datetime import timedelta
 
-# --- 사용자 설정 ---
-# 1. 자막을 추출할 동영상 파일 경로를 여기에 입력하세요.
-VIDEO_FILE_PATH = "Carly Rae Jepsen - Call Me Maybe.mp4" 
-
-# 2. Whisper 모델 크기 (작을수록 빠르지만 정확도는 낮아짐)
-MODEL_SIZE = "base"
-# ------------------
-
+# 현재 파일(main.py)이 있는 폴더 경로를 가져옵니다.
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 1. 모델 로드 시작/완료
-print(f"[STATUS] Whisper '{MODEL_SIZE}' 모델 로드 시작...")
-try:
-    WHISPER_MODEL = whisper.load_model(MODEL_SIZE)
-    print(f"[STATUS] Whisper '{MODEL_SIZE}' 모델 로드 완료.")
-except:
-    print("[ERROR] Whisper 모델 로드 실패. 프로그램을 종료합니다.")
-    sys.exit(1)
+
+from audio import AudioExtractor
+from engsrt import WhisperTranscriber
+from en_to_ko import DeepLTranslator
+# 팀장님 번역 모듈 임포트 시도
 
 
-def extract_audio(video_path):
-    if not os.path.exists(video_path):
-        raise FileNotFoundError
-        
-    base_name = os.path.splitext(os.path.basename(video_path))[0]
-    audio_path = os.path.join(PROJECT_DIR, f"{base_name}_temp_audio.mp3")
-    
-    # 2. 오디오 추출 시작
-    print("[STATUS] 1/3. 동영상에서 오디오 추출 시작...")
-    video_clip = VideoFileClip(video_path)
-    video_clip.audio.write_audiofile(
-        audio_path, 
-        codec='mp3', 
-        logger=None
-    )
-    video_clip.close()
-    return audio_path
-
-
-def generate_srt(audio_path):
-    # 3. STT(자막 생성) 시작
-    print("[STATUS] 2/3. 음성 인식을 통한 영어 자막 생성 시작...")
-    result = WHISPER_MODEL.transcribe(
-        audio=audio_path, 
-        language="en",          
-        word_timestamps=True    
-    )
-
-    subtitles = []
-    for i, segment in enumerate(result["segments"]):
-        start_ms = int(segment['start'] * 1000)
-        end_ms = int(segment['end'] * 1000)
-        
-        subtitles.append(
-            srt.Subtitle(
-                index=i + 1,
-                start=timedelta(milliseconds=start_ms),
-                end=timedelta(milliseconds=end_ms),
-                content=segment['text'].strip()
-            )
-        )
-
-    srt_filename = os.path.splitext(os.path.basename(audio_path))[0].replace('_temp_audio', '_en') + ".srt"
-    srt_path = os.path.join(PROJECT_DIR, srt_filename)
-    
-    final_srt_content = srt.compose(subtitles)
-    
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(final_srt_content)
-        
-    # 4. SRT 파일 저장 완료
-    print(f"[STATUS] 3/3. 영어 SRT 파일 저장 완료: {os.path.basename(srt_path)}")
-    return srt_path
-
+# --- 사용자 설정 ---
+VIDEO_FILE_PATH = "류건의 작업실\Carly Rae Jepsen - Call Me Maybe.mp4" 
+MODEL_SIZE = "small"
+# ------------------
 
 def main():
+    print(f"[설정 확인] 현재 작업 경로: {PROJECT_DIR}")
+    
+    # ffmpeg.exe 존재 여부 체크
+    ffmpeg_path = os.path.join(PROJECT_DIR, "ffmpeg.exe")
+    if os.path.exists(ffmpeg_path):
+        print(f"[설정 확인] ✅ ffmpeg.exe가 정상적으로 감지되었습니다.")
+    else:
+        print(f"[설정 확인] ⚠️ 경고: 폴더 내에 ffmpeg.exe가 보이지 않습니다.")
+        print("          시스템 PATH에 설치되어 있지 않다면 오류가 날 수 있습니다.")
+
+    # 0. 객체 초기화
+    audio_extractor = AudioExtractor(PROJECT_DIR)
+    stt_worker = WhisperTranscriber(model_size=MODEL_SIZE)
+    translator = DeepLTranslator()
+
     audio_path = None
+    
     try:
-        audio_path = extract_audio(VIDEO_FILE_PATH)
-        generate_srt(audio_path)
+        # 1. 오디오 추출
+        audio_path = audio_extractor.extract(VIDEO_FILE_PATH)
         
-    except FileNotFoundError:
-        print(f"[ERROR] 파일을 찾을 수 없습니다: {VIDEO_FILE_PATH}")
-        sys.exit(1)
+        # 2. Whisper로 영문 자막 데이터 생성
+        segments = stt_worker.run_whisper(audio_path)
+        eng_subtitles = stt_worker.create_srt_content(segments)
+        
+        # 3. 영문 SRT 파일 저장
+        base_name = os.path.splitext(os.path.basename(VIDEO_FILE_PATH))[0]
+        eng_srt_path = os.path.join(PROJECT_DIR, f"{base_name}_en.srt")
+        print(f"[STATUS] 3/4. 영어 자막 저장 중...")
+        stt_worker.save_srt_file(eng_subtitles, eng_srt_path)
+
+        # 4. 자막 번역 및 한글 SRT 저장
+        if translator.translator:
+            kor_subtitles = stt_worker.translate_subtitles(eng_subtitles, translator)
+            kor_srt_path = os.path.join(PROJECT_DIR, f"{base_name}_ko.srt")
+            stt_worker.save_srt_file(kor_subtitles, kor_srt_path)
+        else:
+            print("[WARN] 번역기 초기화 실패로 번역 단계는 건너뜁니다.")
+
     except Exception as e:
-        print(f"[ERROR] 처리 중 알 수 없는 오류 발생: {e}")
+        print(f"\n[ERROR] 작업 중 치명적인 오류 발생: {e}")
+        import traceback
+        traceback.print_exc() # 자세한 에러 위치 출력
         sys.exit(1)
         
     finally:
-        # 5. 임시 파일 정리 완료
         if audio_path and os.path.exists(audio_path):
-            os.remove(audio_path)
-            print(f"[STATUS] 임시 오디오 파일 정리 완료.")
+            try:
+                os.remove(audio_path)
+                print(f"[STATUS] 임시 오디오 파일 정리 완료.")
+            except:
+                pass
         
-        print("\n✨ 모든 과정 완료. 프로젝트의 다음 단계인 번역을 시작할 준비가 되었습니다.")
-
+        print("\n✨ 모든 과정이 완료되었습니다!")
 
 if __name__ == '__main__':
     main()
