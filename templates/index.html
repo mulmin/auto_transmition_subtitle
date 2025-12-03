@@ -2,100 +2,86 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 자동 자막 생성기</title>
+    <title>영상 한영 번역기</title>
     <style>
-        body { font-family: 'Apple SD Gothic Neo', sans-serif; text-align: center; background-color: #f4f4f9; padding: 50px; }
-        .container { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; width: 100%; }
-        h1 { color: #333; margin-bottom: 10px; }
-        p { color: #666; margin-bottom: 30px; }
+        body { font-family: 'Apple SD Gothic Neo', sans-serif; text-align: center; background-color: #f0f2f5; padding: 50px; }
+        .container { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; width: 100%; }
+        h1 { color: #333; margin-bottom: 5px; }
+        .subtitle { color: #666; font-size: 0.9em; margin-bottom: 30px; }
         
-        input[type="file"] { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; width: 80%; }
+        input[type="file"] { margin-bottom: 20px; padding: 15px; border: 2px dashed #ddd; border-radius: 10px; width: 80%; background: #fafafa; }
         
-        button { background-color: #6c5ce7; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; transition: 0.3s; width: 100%; }
-        button:hover { background-color: #5b4cc4; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        button { background-color: #4e54c8; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; transition: 0.3s; width: 100%; font-weight: bold;}
+        button:hover { background-color: #3f44a5; transform: translateY(-2px); }
 
-        .loading, .success { display: none; margin-top: 20px; }
-        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #6c5ce7; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px auto; }
+        .loading, .success { display: none; margin-top: 30px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #4e54c8; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .loading-text { color: #6c5ce7; font-weight: bold; }
-        .success-text { color: #00b894; font-weight: bold; font-size: 1.2em; }
+        .info-text { color: #4e54c8; font-weight: bold; line-height: 1.6; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>🎬 AI 자막 생성기</h1>
-        <p>영상을 올리면 Whisper AI가 자막(SRT)을 만들어줍니다.</p>
+        <h1>🎬 영상 번역기</h1>
+        <p class="subtitle">영상 업로드 👉 AI 자막 생성 👉 DeepL 한글 번역</p>
 
         <div class="input-area" id="inputArea">
             <form id="uploadForm">
                 <input type="file" name="video_file" id="videoFile" accept="video/*" required>
                 <br>
-                <button type="submit" id="submitBtn">자막 변환 시작 🚀</button>
+                <button type="submit">한글 자막 생성하기 ✨</button>
             </form>
         </div>
 
         <div class="loading" id="loadingArea">
             <div class="spinner"></div>
-            <div class="loading-text">
-                AI가 영상을 분석 중입니다... 🤖<br>
+            <div class="info-text">
+                1. 오디오 추출 중... 🎵<br>
+                2. Whisper가 영어 받아쓰기 중... 🤖<br>
+                3. DeepL이 한글로 번역 중... 🇰🇷<br>
                 (잠시만 기다려주세요!)
             </div>
         </div>
 
         <div class="success" id="successArea">
-            <div class="success-text">🎉 자막 생성 완료!</div>
-            <p>파일이 다운로드되었습니다.</p>
-            <button onclick="location.reload()">다른 영상 변환하기</button>
+            <h2 style="color: #00b894;">완료! 🎉</h2>
+            <p>자막 파일이 다운로드되었습니다.</p>
+            <button onclick="location.reload()">다른 영상 번역하기</button>
         </div>
     </div>
 
     <script>
+        // (기존 스크립트와 동일)
         const form = document.getElementById('uploadForm');
         const inputArea = document.getElementById('inputArea');
         const loadingArea = document.getElementById('loadingArea');
         const successArea = document.getElementById('successArea');
 
         form.addEventListener('submit', async (e) => {
-            e.preventDefault(); // 기본 폼 제출 막기 (화면 깜빡임 방지)
-
-            // 파일이 있는지 확인
+            e.preventDefault();
             const fileInput = document.getElementById('videoFile');
-            if(fileInput.files.length === 0) {
-                alert("파일을 선택해주세요!");
-                return;
-            }
+            if(fileInput.files.length === 0) { alert("파일을 선택해주세요!"); return; }
 
-            // UI 변경 (로딩 시작)
             inputArea.style.display = 'none';
             loadingArea.style.display = 'block';
 
-            // 데이터 준비
             const formData = new FormData();
             formData.append('video_file', fileInput.files[0]);
 
             try {
-                // 서버로 전송 (Fetch API 사용)
-                const response = await fetch('/', {
-                    method: 'POST',
-                    body: formData
-                });
-
+                const response = await fetch('/', { method: 'POST', body: formData });
                 if (response.ok) {
-                    // 응답이 오면 파일 다운로드 처리
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    // 파일 이름 추출 (서버에서 보낸 헤더에서 가져오거나 기본값 사용)
-                    a.download = "subtitle.srt"; 
+                    // 파일 이름이 헤더에 없으면 기본값
+                    a.download = "translated_subtitle.srt"; 
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
 
-                    // UI 변경 (성공 화면)
                     loadingArea.style.display = 'none';
                     successArea.style.display = 'block';
                 } else {
@@ -104,11 +90,10 @@
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert("에러가 발생했습니다: " + error);
+                alert("에러: " + error);
                 location.reload();
             }
         });
     </script>
-
 </body>
 </html>
