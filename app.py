@@ -2,18 +2,18 @@ import os
 from flask import Flask, render_template, request, send_file
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
-import logging
 
-# 팀원(친구)들의 모듈 가져오기
-from audio import AudioExtractor
-from engsrt import WhisperTranscriber
-from en_to_ko import OpenAITranslator # [변경] DeepL -> OpenAITranslator
-
-# 로깅 설정 (친구 코드가 logging을 써서 추가함)
-logging.basicConfig(level=logging.INFO)
+# 팀원(친구)들의 모듈 가져오기 (에러 처리 추가)
+try:
+    from audio import AudioExtractor
+    from engsrt import WhisperTranscriber
+    from en_to_ko import OpenAITranslator # DeepL이 아니라 OpenAI입니다!
+except ImportError as e:
+    print(f"❌ [오류] 모듈을 찾을 수 없습니다: {e}")
+    print("👉 audio.py, engsrt.py, en_to_ko.py 파일이 app.py와 같은 폴더에 있는지 확인하세요.")
 
 app = Flask(__name__)
-load_dotenv() # .env 파일 로드
+load_dotenv() # .env 파일에서 API 키 로드
 
 # 경로 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,20 +23,27 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # 모델 크기
 MODEL_SIZE = "small"
 
-print("⚙️ [초기화] 시스템 준비 중...")
+print("⚙️ [시스템 기동] AI 자막 생성기 초기화 중...")
 
-# 1. 오디오 추출기 준비
-extractor = AudioExtractor(BASE_DIR)
+# 1. 오디오 추출기 (audio.py)
+# (친구 코드에 따라 인자가 다를 수 있어 유연하게 처리)
+try:
+    extractor = AudioExtractor(BASE_DIR)
+except:
+    extractor = AudioExtractor() # 인자가 필요 없는 경우
 
-# 2. Whisper 자막기 준비
+# 2. Whisper 자막 생성기 (engsrt.py)
 transcriber = WhisperTranscriber(model_size=MODEL_SIZE)
 
-# 3. OpenAI 번역기 준비 [핵심 변경 사항!]
-# .env 파일에서 API 키를 꺼내서 친구 코드(OpenAITranslator)에 넘겨줍니다.
+# 3. OpenAI 번역기 (en_to_ko.py)
 api_key = os.getenv("API_KEY")
+if not api_key:
+    print("⚠️ [경고] .env 파일에 API_KEY가 없습니다. 번역 기능이 작동하지 않습니다.")
+
 translator = OpenAITranslator(api_key=api_key)
 
-print("✅ 시스템 준비 완료!")
+print("✅ 시스템 준비 완료! 웹서버를 시작합니다.")
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -66,19 +73,16 @@ def index():
 
                 final_download_path = eng_srt_path
 
-                # 3. OpenAI 한글 번역 (친구의 engsrt.py 사용)
-                if translator.client: # 번역기가 정상 연결됐다면
-                    print("[INFO] OpenAI 번역 시작...")
-                    
-                    # 친구의 engsrt.py에 있는 함수를 그대로 호출!
-                    # (친구 코드가 알아서 병렬 처리하고 OpenAI로 번역함)
+                # 3. 한글 번역 (OpenAI)
+                if translator.client:
+                    print("[INFO] 한글 번역을 시작합니다...")
                     kor_subtitles = transcriber.translate_subtitles(eng_subtitles, translator)
                     
                     kor_srt_path = os.path.join(UPLOAD_FOLDER, f"{base_name}_ko.srt")
                     transcriber.save_srt_file(kor_subtitles, kor_srt_path)
                     final_download_path = kor_srt_path
                 else:
-                    print("[WARN] API 키 문제로 번역을 건너뜁니다.")
+                    print("[WARN] 번역기가 준비되지 않아 영어 자막만 다운로드합니다.")
                 
                 return send_file(final_download_path, as_attachment=True)
 
@@ -94,4 +98,5 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
+    # 5001번 포트로 실행
     app.run(debug=True, port=5001)

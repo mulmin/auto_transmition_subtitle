@@ -6,5 +6,4 @@ uploads/
 *.mp3
 *.srt
 .vscode/
-
 .env
