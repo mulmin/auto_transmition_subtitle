@@ -4,7 +4,7 @@ import logging
 import whisper
 import srt
 from datetime import timedelta
-import concurrent.futures  # 병렬 처리를 위한 모듈 (속도 향상)
+import concurrent.futures
 
 class WhisperTranscriber:
     def __init__(self, model_size="base"):
@@ -29,8 +29,8 @@ class WhisperTranscriber:
             result = self.model.transcribe(
                 audio=audio_path, 
                 language="en",          
-                word_timestamps=True,   # 정교한 타임스탬프 사용
-                verbose=False           # 불필요한 콘솔 출력 끄기
+                word_timestamps=True,   # [중요] 단어별 시간 정보를 얻기 위해 필수
+                verbose=False
             )
             return result["segments"]
         except Exception as e:
@@ -38,24 +38,70 @@ class WhisperTranscriber:
             raise e
 
     def create_srt_content(self, segments):
-        """Whisper 결과를 srt 객체 리스트로 변환"""
+        """
+        [핵심 수정] 
+        Whisper의 긴 세그먼트를 단어(word) 단위로 쪼개서 
+        짧은 호흡의 자막으로 재구성합니다.
+        """
         subtitles = []
-        # 요청하신 대로 글자수 제한(max_char) 및 줄바꿈 로직을 제거했습니다.
+        subtitle_index = 1
+        
+        # [설정] 한 자막당 최대 글자 수 (이걸 줄이면 자막이 더 자주 바뀝니다)
+        MAX_CHARS_PER_LINE = 40 
 
-        for i, segment in enumerate(segments):
-            start_ms = int(segment['start'] * 1000)
-            end_ms = int(segment['end'] * 1000)
-            text = segment['text'].strip()
+        for segment in segments:
+            # 단어 정보가 없으면(구버전 모델 등) 그냥 통째로 처리
+            if 'words' not in segment:
+                start_ms = int(segment['start'] * 1000)
+                end_ms = int(segment['end'] * 1000)
+                subtitles.append(srt.Subtitle(subtitle_index, timedelta(milliseconds=start_ms), timedelta(milliseconds=end_ms), segment['text'].strip()))
+                subtitle_index += 1
+                continue
 
-            # 줄바꿈 처리 없이 있는 그대로 자막 생성
-            subtitles.append(
-                srt.Subtitle(
-                    index=i + 1,
-                    start=timedelta(milliseconds=start_ms),
-                    end=timedelta(milliseconds=end_ms),
+            # 단어들을 모아서 새로운 문장 만들기
+            current_words = []
+            current_len = 0
+
+            for word_info in segment['words']:
+                word = word_info['word'].strip()
+                current_words.append(word_info)
+                current_len += len(word) + 1 # 공백 포함 길이 계산
+
+                # 글자 수가 꽉 찼거나, 문장이 끝나는 기호가 있으면 자막 자르기
+                if current_len >= MAX_CHARS_PER_LINE or word.endswith(('.', '?', '!')):
+                    if not current_words: continue
+
+                    # 모인 단어들의 시작과 끝 시간 계산
+                    start_time = timedelta(seconds=current_words[0]['start'])
+                    end_time = timedelta(seconds=current_words[-1]['end'])
+                    text = " ".join([w['word'].strip() for w in current_words])
+
+                    subtitles.append(srt.Subtitle(
+                        index=subtitle_index,
+                        start=start_time,
+                        end=end_time,
+                        content=text
+                    ))
+                    subtitle_index += 1
+                    
+                    # 초기화
+                    current_words = []
+                    current_len = 0
+            
+            # 남은 찌꺼기 단어들 처리
+            if current_words:
+                start_time = timedelta(seconds=current_words[0]['start'])
+                end_time = timedelta(seconds=current_words[-1]['end'])
+                text = " ".join([w['word'].strip() for w in current_words])
+
+                subtitles.append(srt.Subtitle(
+                    index=subtitle_index,
+                    start=start_time,
+                    end=end_time,
                     content=text
-                )
-            )
+                ))
+                subtitle_index += 1
+
         return subtitles
 
     def save_srt_file(self, subtitles, output_path):
@@ -70,21 +116,18 @@ class WhisperTranscriber:
             raise e
 
     def translate_subtitles(self, subtitles, translator):
-        """영문 자막 -> 한글 자막 번역 (병렬 처리 적용으로 속도 향상)"""
+        """영문 자막 -> 한글 자막 번역 (병렬 처리)"""
         logging.info(">>> [4/4] 자막 번역 시작 (OpenAI 병렬 처리)...")
         
-        # 결과를 순서대로 저장하기 위해 리스트 미리 할당
         translated_subtitles = [None] * len(subtitles)
 
-        # 하나의 자막을 번역하는 내부 함수
         def process_single_subtitle(index, sub):
-            # 혹시 모를 줄바꿈 문자만 공백으로 치환 (번역 정확도 위해)
             clean_text = sub.content.replace("\n", " ")
             try:
                 translated_text = translator.translate(clean_text)
             except Exception as e:
-                logging.warning(f"번역 실패 (구간 {sub.index}): {e}")
-                translated_text = sub.content # 실패 시 원문 유지
+                logging.warning(f"번역 실패: {e}")
+                translated_text = sub.content
             
             return index, srt.Subtitle(
                 index=sub.index,
@@ -93,23 +136,19 @@ class WhisperTranscriber:
                 content=translated_text
             )
 
-        # ThreadPoolExecutor를 사용하여 병렬 처리 (최대 5개 동시 요청)
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # 모든 자막에 대해 번역 작업 예약
             future_to_sub = {
                 executor.submit(process_single_subtitle, i, sub): sub 
                 for i, sub in enumerate(subtitles)
             }
             
-            # 작업이 완료되는 대로 결과 수집
             for future in concurrent.futures.as_completed(future_to_sub):
                 try:
                     index, new_sub = future.result()
                     translated_subtitles[index] = new_sub
                 except Exception as exc:
-                    logging.error(f"번역 쓰레드 오류: {exc}")
+                    logging.error(f"쓰레드 오류: {exc}")
 
-        # 혹시라도 None으로 남아있는 부분이 있다면 원본으로 채움 (안전장치)
         for i, sub in enumerate(translated_subtitles):
             if sub is None:
                 translated_subtitles[i] = subtitles[i]
