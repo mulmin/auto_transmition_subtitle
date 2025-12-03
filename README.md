@@ -1,1 +1,8 @@
 # auto_transmition_subtitle
+
+사용 설명
+1. https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip 다운받고 - bin 안에 있는 ffmpeg 파일을 꺼내서 류건의 작업실 안에 넣음
+2.. 제어판켜서 시스템환경변수 편집 해서 path에 zn_workspace 추가 (이렇게 해야 ffmpeg를 인식함)
+3. .env 파일 만들어서 zn_workspace 내에 넣기
+4. 원하는 영어기반 mp4 다운받아서 zn_workspace 내에 넣고 main.py 사용자 설정 파트에서 VIDEO_FILE_PATH를 상대경로 복붙
+5. pip install -r requirements.txt
