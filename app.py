@@ -2,15 +2,15 @@ import os
 from flask import Flask, render_template, request, send_file
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+import logging
 
-# 팀원(친구)들이 만든 모듈 가져오기
-try:
-    from audio import AudioExtractor
-    from engsrt import WhisperTranscriber
-    from en_to_ko import DeepLTranslator
-except ImportError as e:
-    print(f"❌ 오류: 모듈을 찾을 수 없습니다. ({e})")
-    print("👉 audio.py, engsrt.py 등이 app.py와 같은 폴더에 있는지 확인해주세요!")
+# 팀원(친구)들의 모듈 가져오기
+from audio import AudioExtractor
+from engsrt import WhisperTranscriber
+from en_to_ko import OpenAITranslator # [변경] DeepL -> OpenAITranslator
+
+# 로깅 설정 (친구 코드가 logging을 써서 추가함)
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 load_dotenv() # .env 파일 로드
@@ -20,13 +20,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 모델 크기 (친구 코드 설정에 맞춤)
-MODEL_SIZE = "small" 
+# 모델 크기
+MODEL_SIZE = "small"
 
-print("⚙️ [초기화] AI 모델 및 번역기 준비 중...")
-extractor = AudioExtractor(BASE_DIR) # 친구 코드는 프로젝트 경로를 받음
+print("⚙️ [초기화] 시스템 준비 중...")
+
+# 1. 오디오 추출기 준비
+extractor = AudioExtractor(BASE_DIR)
+
+# 2. Whisper 자막기 준비
 transcriber = WhisperTranscriber(model_size=MODEL_SIZE)
-translator = DeepLTranslator()
+
+# 3. OpenAI 번역기 준비 [핵심 변경 사항!]
+# .env 파일에서 API 키를 꺼내서 친구 코드(OpenAITranslator)에 넘겨줍니다.
+api_key = os.getenv("API_KEY")
+translator = OpenAITranslator(api_key=api_key)
+
 print("✅ 시스템 준비 완료!")
 
 @app.route('/', methods=['GET', 'POST'])
@@ -43,11 +52,10 @@ def index():
 
             audio_path = None
             try:
-                # 1. 오디오 추출 (audio.py)
-                # 친구 코드는 저장 경로를 내부에서 정하므로 video_path만 넘김
+                # 1. 오디오 추출
                 audio_path = extractor.extract(video_path)
                 
-                # 2. Whisper 자막 생성 (engsrt.py)
+                # 2. Whisper 영어 자막 생성
                 segments = transcriber.run_whisper(audio_path)
                 eng_subtitles = transcriber.create_srt_content(segments)
                 
@@ -58,14 +66,19 @@ def index():
 
                 final_download_path = eng_srt_path
 
-                # 3. 한글 번역 (en_to_ko.py)
-                if translator.translator:
-                    print("[INFO] DeepL 번역 시작...")
+                # 3. OpenAI 한글 번역 (친구의 engsrt.py 사용)
+                if translator.client: # 번역기가 정상 연결됐다면
+                    print("[INFO] OpenAI 번역 시작...")
+                    
+                    # 친구의 engsrt.py에 있는 함수를 그대로 호출!
+                    # (친구 코드가 알아서 병렬 처리하고 OpenAI로 번역함)
                     kor_subtitles = transcriber.translate_subtitles(eng_subtitles, translator)
                     
                     kor_srt_path = os.path.join(UPLOAD_FOLDER, f"{base_name}_ko.srt")
                     transcriber.save_srt_file(kor_subtitles, kor_srt_path)
                     final_download_path = kor_srt_path
+                else:
+                    print("[WARN] API 키 문제로 번역을 건너뜁니다.")
                 
                 return send_file(final_download_path, as_attachment=True)
 
@@ -81,5 +94,4 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
-    # 5000번 포트 충돌 방지를 위해 5001번으로 실행
     app.run(debug=True, port=5001)

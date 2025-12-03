@@ -28,7 +28,7 @@ class OpenAITranslator:
 
         try:
             # 1. 기본 프롬프트 설정 (시스템 역할 부여)
-            system_prompt = "You are a professional subtitle translator. Translate the English text into natural Korean."
+            system_prompt = "You are a professional subtitle translator. Translate the English text into Korean as naturally as possible.If translation:,',\" appears in the result, delete it."
             user_prompt = f"Text: '{text}'"
 
             # =================================================================
