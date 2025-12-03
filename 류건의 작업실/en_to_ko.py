@@ -1,69 +1,58 @@
-# 파이썬 인터프리터 경로 확인
-# import sys
-# print(sys.executable)
-
-import deepl
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 
-class DeepLTranslator:
-    def __init__(self):
-        
+class OpenAITranslator:
+    def __init__(self, api_key, model="gpt-4o-mini"):
+
+        self.api_key = api_key
+        self.model = model
+    
         try:
-            # 1. 번역기 초기화
-            load_dotenv()
-
-            self.api_key = os.getenv("API_KEY")
-            self.translator = deepl.Translator(self.api_key)
-            
-            
-            # 2. 키가 유효한지 살짝 테스트 (사용량 확인으로 검증)
-            usage = self.translator.get_usage()
-            print(f"✅ DeepL 번역기 연결 성공! (남은 용량: {usage.character.limit - usage.character.count}자)")
-            
-        except deepl.AuthorizationException:
-            print("❌ [오류] API 키가 잘못되었습니다. 다시 확인해주세요.")
-            self.translator = None
+            self.client = OpenAI(api_key=api_key)
+            print(f"✅ OpenAI 번역기 초기화 성공! (모델: {self.model})")
         except Exception as e:
-            print(f"❌ [오류] 초기화 중 문제 발생: {e}")
-            self.translator = None
+            print(f"❌ [오류] OpenAI 클라이언트 초기화 실패: {e}")
+            self.client = None
 
-    def translate(self, text, target_lang="KO"):
+    def translate(self, text, emotion=None):
         """
         텍스트를 번역하는 메서드
         :param text: 번역할 영어 텍스트
-        :param target_lang: 목표 언어 코드 (기본값: KO - 한국어)
-        :return: 번역된 텍스트 (실패 시 에러 메시지 반환)
-
-        중요 사항: text만 입력하면 가능함
+        :param emotion: (선택) 감정 상태 (예: 'angry', 'sad'). None이면 일반 번역.
         """
-        # 초기화 실패했거나 텍스트가 비어있으면 중단
-        if not self.translator:
+        if not self.client:
             return "[시스템] 번역기가 초기화되지 않았습니다."
         if not text or text.strip() == "":
             return ""
 
         try:
-            # 번역 실행
-            result = self.translator.translate_text(text, target_lang=target_lang)
-            return result.text
-            
-        except deepl.QuotaExceededException:
-            return "❌ [오류] 이번 달 무료 번역 용량을 모두 사용했습니다."
-        except deepl.ConnectionException:
-            return "❌ [오류] 인터넷 연결을 확인해주세요."
-        except Exception as e:
-            return f"❌ [오류] 번역 중 알 수 없는 에러: {e}"
+            # 1. 기본 프롬프트 설정 (시스템 역할 부여)
+            system_prompt = "You are a professional subtitle translator. Translate the English text into natural Korean."
+            user_prompt = f"Text: '{text}'"
 
-    def get_usage_status(self):
-        """현재 사용량 정보를 텍스트로 반환"""
-        if not self.translator: return "확인 불가"
-        
-        try:
-            usage = self.translator.get_usage()
-            if usage.character.limit:
-                percent = (usage.character.count / usage.character.limit) * 100
-                return f"사용량: {usage.character.count}/{usage.character.limit} 자 ({percent:.1f}%)"
-            return "무제한 요금제 사용 중"
-        except:
-            return "사용량 정보 조회 실패"
+            # =================================================================
+            # 🔒 [감정 모듈] (현재 비활성화됨: 나중에 주석을 풀어서 사용하세요)
+            # =================================================================
+            # if emotion and emotion != "neutral":
+            #     # 시스템 프롬프트에 감정 반영 지시 추가
+            #     system_prompt += " The speaker is feeling a specific emotion. Reflect this emotion in the Korean translation style (honorifics, ending, nuance)."
+            #     # 사용자 입력에 감정 정보 추가
+            #     user_prompt += f"\nSpeaker's Emotion: {emotion}"
+            # =================================================================
+
+            # 2. OpenAI API 호출
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3  # 0에 가까울수록 직역, 높을수록 창의적(의역)
+            )
+
+            # 3. 결과 반환
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            return f"❌ [오류] OpenAI 번역 중 에러 발생: {e}"
