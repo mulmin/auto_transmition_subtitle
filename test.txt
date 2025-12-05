@@ -2,3 +2,5 @@
 1-2. 제어판켜서 시스템환경변수 편집 해서 path에 류건의 작업실 추가 (이렇게 해야 ffmpeg를 인식함)
 2. pip install openai-whisper moviepy srt deepl python-dotenv
 3. .env 파일 만들어서 류건의 작업실 내에 넣기
+4. 원하는 영어기반 mp4 다운받아서 류건의 작업실 내에 넣고 main.py 사용자 설정 파트에서 VIDEO_FILE_PATH를 상대경로 복붙
+5. 실행 ㄱㄱ
