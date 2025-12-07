@@ -1,58 +1,44 @@
 from openai import OpenAI
-from dotenv import load_dotenv
-import os
 
 class OpenAITranslator:
-    def __init__(self, api_key, model="gpt-4o-mini"):
+    def __init__(self, api_key):
+        self.client = None
+        if api_key:
+            try:
+                self.client = OpenAI(api_key=api_key)
+            except Exception as e:
+                print(f"OpenAI 초기화 실패: {e}")
 
-        self.api_key = api_key
-        self.model = model
-    
-        try:
-            self.client = OpenAI(api_key=api_key)
-            print(f"✅ OpenAI 번역기 초기화 성공! (모델: {self.model})")
-        except Exception as e:
-            print(f"❌ [오류] OpenAI 클라이언트 초기화 실패: {e}")
-            self.client = None
+    def translate(self, text, emotion="neutral"):
+        # 1. 예외 처리: 클라이언트가 없거나 텍스트가 비었으면 원문 반환
+        if not self.client or not text: return text
 
-    def translate(self, text, emotion=None):
-        """
-        텍스트를 번역하는 메서드
-        :param text: 번역할 영어 텍스트
-        :param emotion: (선택) 감정 상태 (예: 'angry', 'sad'). None이면 일반 번역.
-        """
-        if not self.client:
-            return "[시스템] 번역기가 초기화되지 않았습니다."
-        if not text or text.strip() == "":
-            return ""
+        # 2. 시스템 프롬프트 설정 (역할 부여)
+        # "Output ONLY the translated text" -> 번역문 외에 딴소리 하지 말라는 핵심 지시
+        sys_prompt = (
+            "You are a professional subtitle translator. Translate English to Korean. "
+            "Output ONLY the translated text. Do NOT add notes, explanations, or parentheses."
+        )
+        user_prompt = f"Text: '{text}'"
 
-        try:
-            # 1. 기본 프롬프트 설정 (시스템 역할 부여)
-            system_prompt = "You are a professional subtitle translator. Translate the English text into Korean as naturally as possible.If translation:,',\" appears in the result, delete it."
-            user_prompt = f"Text: '{text}'"
-
-            # =================================================================
-            # 🔒 [감정 모듈] (현재 비활성화됨: 나중에 주석을 풀어서 사용하세요)
-            # =================================================================
-            # if emotion and emotion != "neutral":
-            #     # 시스템 프롬프트에 감정 반영 지시 추가
-            #     system_prompt += " The speaker is feeling a specific emotion. Reflect this emotion in the Korean translation style (honorifics, ending, nuance)."
-            #     # 사용자 입력에 감정 정보 추가
-            #     user_prompt += f"\nSpeaker's Emotion: {emotion}"
-            # =================================================================
-
-            # 2. OpenAI API 호출
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3  # 0에 가까울수록 직역, 높을수록 창의적(의역)
+        # 3. 감정 반영 지시 (괄호 사용 금지 명시)
+        if emotion and emotion != "neutral":
+            sys_prompt += (
+                f" The speaker feels '{emotion}'. "
+                "Reflect this emotion ONLY through Korean nuances, sentence endings, and punctuation. "
+                "Do NOT add descriptive text like (sad) or (angry)."
             )
 
-            # 3. 결과 반환
+        try:
+            # 4. API 호출
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3 # 창의성을 약간 낮춰서 이상한 멘트 방지
+            )
             return response.choices[0].message.content.strip()
-
-        except Exception as e:
-            return f"❌ [오류] OpenAI 번역 중 에러 발생: {e}"
+        except Exception:
+            return text # 에러 시 원문 반환

@@ -1,1 +1,1 @@
-pip install openai-whisper moviepy srt deepl python-dotenv openai
+pip install openai-whisper moviepy srt deepl python-dotenv openai transformers librosa torch
